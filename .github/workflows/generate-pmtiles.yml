@@ -103,7 +103,7 @@ jobs:
             data/processed/kokuyurinmeisho.mbtiles \
             data/processed/keikakukumeisho.mbtiles
 
-            - name: Copy PMTiles to GitHub Pages directory
+      - name: Copy PMTiles to GitHub Pages directory
         run: |
           cp production/latest/kokuyurinya.pmtiles _site/tiles/
           
