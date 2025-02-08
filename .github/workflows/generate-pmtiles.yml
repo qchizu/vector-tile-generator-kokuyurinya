@@ -24,6 +24,12 @@ jobs:
           cd tippecanoe
           make -j
           sudo make install
+      
+      - name: Create necessary directories
+        run: |
+          mkdir -p data/processed
+          mkdir -p experiments
+          mkdir -p production/{latest,archive}
 
       - name: Merge GeoJSON files
         run: |
