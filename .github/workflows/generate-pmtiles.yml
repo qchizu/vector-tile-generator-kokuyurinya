@@ -4,7 +4,6 @@ on:
   push:
     paths:
       - 'data/source/**'
-      - 'config/**'
   workflow_dispatch:
 
 jobs:
