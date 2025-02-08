@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write  # GitHub Releasesへの書き込み権限を追加
+      pages: write      # GitHub Pages への書き込み権限を追加
+      id-token: write  # GitHub Pages のデプロイに必要
     steps:
       - uses: actions/checkout@v4
 
@@ -19,6 +21,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gdal-bin
+
+      - name: Create necessary directories
+        run: |
+          mkdir -p data/processed
+          mkdir -p experiments
+          mkdir -p production/{latest,archive}
+          mkdir -p _site/tiles
 
       - name: Setup tippecanoe
         run: |
@@ -94,37 +103,51 @@ jobs:
             data/processed/kokuyurinmeisho.mbtiles \
             data/processed/keikakukumeisho.mbtiles
 
-      - name: Get current date
-        id: date
-        run: echo "DATE=$(date +'%Y%m%d')" >> $GITHUB_ENV
+            - name: Copy PMTiles to GitHub Pages directory
+        run: |
+          cp production/latest/kokuyurinya.pmtiles _site/tiles/
+          
+          # index.htmlの作成（CORS設定を含む）
+          cat > _site/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <title>PMTiles Hosting</title>
+          </head>
+          <body>
+            <h1>PMTiles Hosting</h1>
+            <p>PMTiles URL: <code>https://qchizu.github.io/polygon-pmtiles-generator/tiles/kokuyurinya.pmtiles</code></p>
+          </body>
+          </html>
+          EOF
 
-      - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v1
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          name: Release ${{ env.DATE }}
-          tag_name: v${{ env.DATE }}
-          files: |
-            production/latest/kokuyurinya.pmtiles
-          body: |
-            PMTiles generated on ${{ env.DATE }}
-            
-            ## Changes
-            - Update from source data
-            
-            ## Download
-            Direct link to PMTiles: ${{ github.server_url }}/${{ github.repository }}/releases/download/v${{ env.DATE }}/kokuyurinya.pmtiles
+          path: '_site'
 
-      - name: Update README with latest PMTiles URL
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Update README
         run: |
           cat > README.md << EOF
           # Polygon PMTiles Generator
-          
-          最新のPMTilesファイル:
-          ${{ github.server_url }}/${{ github.repository }}/releases/latest/download/kokuyurinya.pmtiles
-          
+
+          ## PMTiles URL
+          \`\`\`
+          https://qchizu.github.io/polygon-pmtiles-generator/tiles/kokuyurinya.pmtiles
+          \`\`\`
+
+          このURLは、MapLibre GLなどのPMTilesをサポートする地図ライブラリで直接利用できます。
+
           ## 更新履歴
-          - ${{ env.DATE }}: データ更新
+          - $(date +'%Y-%m-%d'): データ更新
           EOF
           
           git config --global user.name "GitHub Actions"
