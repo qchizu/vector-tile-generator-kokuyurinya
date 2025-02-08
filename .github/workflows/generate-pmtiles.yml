@@ -10,6 +10,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # GitHub Releasesへの書き込み権限を追加
     steps:
       - uses: actions/checkout@v4
 
@@ -24,7 +26,7 @@ jobs:
           cd tippecanoe
           make -j
           sudo make install
-      
+
       - name: Create necessary directories
         run: |
           mkdir -p data/processed
@@ -35,7 +37,7 @@ jobs:
         run: |
           python3 $(which ogrmerge.py) -single \
             -o data/processed/merged.geojson \
-            data/source/*.geojson
+            data/source/*.geojson || echo "No source files found"
 
       - name: Generate detail layer
         run: |
@@ -83,7 +85,7 @@ jobs:
 
       - name: Join tiles
         run: |
-          tile-join -o data/processed/kokuyurinya.pmtiles \
+          tile-join -o production/latest/kokuyurinya.pmtiles \
             -n "国土数値情報 国有林野データ 2019年度（令和元年度）版" \
             -A "<a href='https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-A45.html'>国土数値情報 国有林野データ</a>" \
             --overzoom \
@@ -91,3 +93,42 @@ jobs:
             data/processed/detail.mbtiles \
             data/processed/kokuyurinmeisho.mbtiles \
             data/processed/keikakukumeisho.mbtiles
+
+      - name: Get current date
+        id: date
+        run: echo "DATE=$(date +'%Y%m%d')" >> $GITHUB_ENV
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ env.DATE }}
+          tag_name: v${{ env.DATE }}
+          files: |
+            production/latest/kokuyurinya.pmtiles
+          body: |
+            PMTiles generated on ${{ env.DATE }}
+            
+            ## Changes
+            - Update from source data
+            
+            ## Download
+            Direct link to PMTiles: ${{ github.server_url }}/${{ github.repository }}/releases/download/v${{ env.DATE }}/kokuyurinya.pmtiles
+
+      - name: Update README with latest PMTiles URL
+        run: |
+          cat > README.md << EOF
+          # Polygon PMTiles Generator
+          
+          最新のPMTilesファイル:
+          ${{ github.server_url }}/${{ github.repository }}/releases/latest/download/kokuyurinya.pmtiles
+          
+          ## 更新履歴
+          - ${{ env.DATE }}: データ更新
+          EOF
+          
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add README.md
+          git commit -m "Update PMTiles URL" || echo "No changes to commit"
+          git push || echo "No changes to push"
