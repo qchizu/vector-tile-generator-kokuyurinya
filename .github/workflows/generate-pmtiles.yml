@@ -1,0 +1,87 @@
+name: Generate PMTiles
+
+on:
+  push:
+    paths:
+      - 'data/source/**'
+      - 'config/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup GDAL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gdal-bin
+
+      - name: Setup tippecanoe
+        run: |
+          git clone https://github.com/felt/tippecanoe.git
+          cd tippecanoe
+          make -j
+          sudo make install
+
+      - name: Merge GeoJSON files
+        run: |
+          python3 $(which ogrmerge.py) -single \
+            -o data/processed/merged.geojson \
+            data/source/*.geojson
+
+      - name: Generate detail layer
+        run: |
+          tippecanoe -o data/processed/detail.mbtiles \
+            -z14 -Z14 \
+            --no-tile-size-limit --no-feature-limit \
+            -l detail \
+            data/processed/merged.geojson
+
+      - name: Generate kokuyurinmeisho layer
+        run: |
+          # ディゾルブ処理
+          ogr2ogr -f FlatGeobuf \
+            data/processed/merged_kokuyurinmeisho_dissolved.fgb \
+            data/processed/merged.geojson \
+            -dialect sqlite \
+            -sql "SELECT ST_Union(geometry) as geometry, 国有林名称, 計画区名称 FROM merged GROUP BY 国有林名称, 計画区名称"
+
+          # タイル化
+          tippecanoe -o data/processed/kokuyurinmeisho.mbtiles \
+            -z13 -Z10 \
+            --no-tile-size-limit --no-feature-limit \
+            -l kokuyurinmeisho \
+            --no-simplification-of-shared-nodes \
+            --detect-shared-borders \
+            data/processed/merged_kokuyurinmeisho_dissolved.fgb
+
+      - name: Generate keikakukumeisho layer
+        run: |
+          # ディゾルブ処理
+          ogr2ogr -f FlatGeobuf \
+            data/processed/merged_keikakukumeisho_dissolved.fgb \
+            data/processed/merged.geojson \
+            -dialect sqlite \
+            -sql "SELECT ST_Union(geometry) as geometry, 計画区名称 FROM merged GROUP BY 計画区名称"
+
+          # タイル化
+          tippecanoe -o data/processed/keikakukumeisho.mbtiles \
+            -z9 -Z2 \
+            --no-tile-size-limit --no-feature-limit \
+            -l keikakukumeisho \
+            --no-simplification-of-shared-nodes \
+            --detect-shared-borders \
+            data/processed/merged_keikakukumeisho_dissolved.fgb
+
+      - name: Join tiles
+        run: |
+          tile-join -o data/processed/kokuyurinya.pmtiles \
+            -n "国土数値情報 国有林野データ 2019年度（令和元年度）版" \
+            -A "<a href='https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-A45.html'>国土数値情報 国有林野データ</a>" \
+            --overzoom \
+            --no-tile-size-limit \
+            data/processed/detail.mbtiles \
+            data/processed/kokuyurinmeisho.mbtiles \
+            data/processed/keikakukumeisho.mbtiles
