@@ -1,5 +1,5 @@
+# 一時的な処理ファイルのみ無視
 data/processed/
-experiments/
-production/
+
+# バイナリファイルは個別に指定
 *.mbtiles
-*.pmtiles
