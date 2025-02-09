@@ -75,14 +75,6 @@ jobs:
         run: |
           echo "TIMESTAMP=$(date +'%Y%m%d_%H%M%S')" >> $GITHUB_ENV
 
-      # 現在の設定を保存
-      - name: Save current configuration
-        run: |
-          CONFIG_DIR="config/$([ -n "${{ github.event.inputs.experiment_name }}" ] && echo "experiments/${{ github.event.inputs.experiment_name }}" || echo "latest")"
-          mkdir -p $CONFIG_DIR
-          cp .github/workflows/generate-pmtiles.yml $CONFIG_DIR/
-          echo "CONFIG_DIR=$CONFIG_DIR" >> $GITHUB_ENV
-
       # 入力GeoJSONファイルの結合
       - name: Merge GeoJSON files
         run: |
@@ -195,7 +187,6 @@ jobs:
             "version": "${{ github.event.inputs.version_tag }}",
             "timestamp": "${{ env.TIMESTAMP }}",
             "filename": "kokuyurinya_${{ env.TIMESTAMP }}.pmtiles",
-            "config_path": "${{ env.CONFIG_DIR }}"
           }
           EOF
 
