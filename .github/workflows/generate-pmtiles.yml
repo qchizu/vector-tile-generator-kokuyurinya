@@ -182,21 +182,6 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
 
-      - name: Check and update .gitignore
-        run: |
-          # .gitignoreファイルがない場合は作成
-          if [ ! -f .gitignore ]; then
-            touch .gitignore
-          fi
-          
-          # experimentsディレクトリを.gitignoreから削除（もし存在する場合）
-          sed -i '/^experiments$/d' .gitignore
-          sed -i '/^experiments\//d' .gitignore
-          
-          # 不要なファイルを.gitignoreに追加
-          echo "data/processed/*.mbtiles" >> .gitignore
-          echo "data/processed/*.fgb" >> .gitignore
-
       - name: Commit changes
         run: |
           git config --global user.name "GitHub Actions"
