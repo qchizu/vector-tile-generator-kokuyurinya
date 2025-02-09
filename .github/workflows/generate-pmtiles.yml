@@ -4,15 +4,34 @@ on:
   push:
     paths:
       - 'data/source/**'
+      - 'config/**'
   workflow_dispatch:
+    inputs:
+      experiment_name:
+        description: 'Name for this experimental configuration'
+        required: false
+        type: string
+      production_release:
+        description: 'Mark this as a production release'
+        required: false
+        type: boolean
+        default: false
+      version_tag:
+        description: 'Version tag for production release (e.g., v1.0.0)'
+        required: false
+        type: string
+
+env:
+  TIMESTAMP: $(date +'%Y%m%d_%H%M%S')
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # GitHub Releasesへの書き込み権限を追加
-      pages: write      # GitHub Pages への書き込み権限を追加
-      id-token: write  # GitHub Pages のデプロイに必要
+      contents: write
+      pages: write
+      id-token: write
+    
     steps:
       - uses: actions/checkout@v4
 
@@ -21,13 +40,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gdal-bin
 
-      - name: Create necessary directories
-        run: |
-          mkdir -p data/processed
-          mkdir -p experiments
-          mkdir -p production/{latest,archive}
-          mkdir -p _site/tiles
-
       - name: Setup tippecanoe
         run: |
           git clone https://github.com/felt/tippecanoe.git
@@ -35,11 +47,19 @@ jobs:
           make -j
           sudo make install
 
-      - name: Create necessary directories
+      - name: Create directory structure
         run: |
           mkdir -p data/processed
           mkdir -p experiments
-          mkdir -p production/{latest,archive}
+          mkdir -p production/releases
+          mkdir -p _site/tiles/{experiments,releases}
+
+      - name: Save current configuration
+        run: |
+          CONFIG_DIR="config/$([ -n "${{ github.event.inputs.experiment_name }}" ] && echo "experiments/${{ github.event.inputs.experiment_name }}" || echo "latest")"
+          mkdir -p $CONFIG_DIR
+          cp .github/workflows/generate-pmtiles.yml $CONFIG_DIR/
+          echo "CONFIG_DIR=$CONFIG_DIR" >> $GITHUB_ENV
 
       - name: Merge GeoJSON files
         run: |
@@ -57,14 +77,12 @@ jobs:
 
       - name: Generate kokuyurinmeisho layer
         run: |
-          # ディゾルブ処理
           ogr2ogr -f FlatGeobuf \
             data/processed/merged_kokuyurinmeisho_dissolved.fgb \
             data/processed/merged.geojson \
             -dialect sqlite \
             -sql "SELECT ST_Union(geometry) as geometry, A45_013, A45_024 FROM merged GROUP BY A45_013, A45_024"
 
-          # タイル化
           tippecanoe -o data/processed/kokuyurinmeisho.mbtiles \
             -z13 -Z10 \
             --no-tile-size-limit --no-feature-limit \
@@ -75,14 +93,12 @@ jobs:
 
       - name: Generate keikakukumeisho layer
         run: |
-          # ディゾルブ処理
           ogr2ogr -f FlatGeobuf \
             data/processed/merged_keikakukumeisho_dissolved.fgb \
             data/processed/merged.geojson \
             -dialect sqlite \
             -sql "SELECT ST_Union(geometry) as geometry, A45_024 FROM merged GROUP BY A45_024"
 
-          # タイル化
           tippecanoe -o data/processed/keikakukumeisho.mbtiles \
             -z9 -Z2 \
             --no-tile-size-limit --no-feature-limit \
@@ -91,10 +107,12 @@ jobs:
             --detect-shared-borders \
             data/processed/merged_keikakukumeisho_dissolved.fgb
 
-      - name: Join tiles
+      - name: Join tiles and generate PMTiles
         run: |
-          tile-join -o production/latest/kokuyurinya.pmtiles \
-            -n "国土数値情報 国有林野データ 2019年度（令和元年度）版" \
+          OUTPUT_NAME="kokuyurinya_${TIMESTAMP}.pmtiles"
+          
+          tile-join -o "data/processed/$OUTPUT_NAME" \
+            -n "国土数値情報 国有林野データ" \
             -A "<a href='https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-A45.html'>国土数値情報 国有林野データ</a>" \
             --overzoom \
             --no-tile-size-limit \
@@ -102,11 +120,32 @@ jobs:
             data/processed/kokuyurinmeisho.mbtiles \
             data/processed/keikakukumeisho.mbtiles
 
-      - name: Copy PMTiles to GitHub Pages directory
+          # 実験用または本番用のディレクトリにコピー
+          if [ "${{ github.event.inputs.experiment_name }}" != "" ]; then
+            mkdir -p "experiments/${{ github.event.inputs.experiment_name }}"
+            cp "data/processed/$OUTPUT_NAME" "experiments/${{ github.event.inputs.experiment_name }}/"
+            cp "data/processed/$OUTPUT_NAME" "_site/tiles/experiments/"
+          elif [ "${{ github.event.inputs.production_release }}" = "true" ]; then
+            cp "data/processed/$OUTPUT_NAME" "production/releases/"
+            cp "data/processed/$OUTPUT_NAME" "_site/tiles/releases/"
+            ln -sf "releases/$OUTPUT_NAME" "production/latest.pmtiles"
+            cp "data/processed/$OUTPUT_NAME" "_site/tiles/latest.pmtiles"
+          fi
+
+      - name: Create version.json
+        if: github.event.inputs.production_release == 'true'
         run: |
-          cp production/latest/kokuyurinya.pmtiles _site/tiles/
-          
-          # index.htmlの作成（CORS設定を含む）
+          cat > _site/tiles/version.json << EOF
+          {
+            "version": "${{ github.event.inputs.version_tag }}",
+            "timestamp": "$TIMESTAMP",
+            "filename": "kokuyurinya_${TIMESTAMP}.pmtiles",
+            "config_path": "${{ env.CONFIG_DIR }}"
+          }
+          EOF
+
+      - name: Generate index page
+        run: |
           cat > _site/index.html << 'EOF'
           <!DOCTYPE html>
           <html>
@@ -116,7 +155,17 @@ jobs:
           </head>
           <body>
             <h1>PMTiles Hosting</h1>
-            <p>PMTiles URL: <code>https://qchizu.github.io/polygon-pmtiles-generator/tiles/kokuyurinya.pmtiles</code></p>
+            <h2>Latest Production Release</h2>
+            <p>URL: <code>https://[username].github.io/[repo]/tiles/latest.pmtiles</code></p>
+            
+            <h2>All Releases</h2>
+            <p>Directory: <code>https://[username].github.io/[repo]/tiles/releases/</code></p>
+            
+            <h2>Experiments</h2>
+            <p>Directory: <code>https://[username].github.io/[repo]/tiles/experiments/</code></p>
+            
+            <h2>Version Info</h2>
+            <p>JSON: <code>https://[username].github.io/[repo]/tiles/version.json</code></p>
           </body>
           </html>
           EOF
@@ -133,32 +182,26 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
 
-      - name: Update README
+      - name: Commit changes
         run: |
-          # プルを実行して最新の変更を取得
-          git pull origin main --rebase
-
-          cat > README.md << EOF
-          # Polygon PMTiles Generator
-
-          ## PMTiles URL
-          \`\`\`
-          https://qchizu.github.io/polygon-pmtiles-generator/tiles/kokuyurinya.pmtiles
-          \`\`\`
-
-          ## データの出典
-          [国土数値情報](https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-A45.html)
-          
-          このURLは、MapLibre GLなどのPMTilesをサポートする地図ライブラリで直接利用できます。
-
-          ## 更新履歴
-          - $(date +'%Y-%m-%d'): データ更新
-          EOF
-          
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
           
-          # コミットとプッシュを強制的に行う
-          git add README.md
-          git commit -m "Update PMTiles URL" || echo "No changes to commit"
-          git push --force || echo "No changes to push"
+          git add config/
+          git add experiments/
+          git add production/
+          
+          if [ "${{ github.event.inputs.production_release }}" = "true" ]; then
+            git tag "${{ github.event.inputs.version_tag }}"
+          fi
+          
+          git commit -m "Update PMTiles and configurations
+          
+          ${TIMESTAMP}
+          Configuration: ${{ env.CONFIG_DIR }}
+          ${{% if github.event.inputs.production_release == 'true' %}}
+          Production Release: ${{ github.event.inputs.version_tag }}
+          ${{% endif %}}" || echo "No changes to commit"
+          
+          git push --tags || echo "No tags to push"
+          git push || echo "No changes to push"
