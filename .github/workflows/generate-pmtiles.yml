@@ -107,9 +107,14 @@ jobs:
             --detect-shared-borders \
             data/processed/merged_keikakukumeisho_dissolved.fgb
 
+      - name: Set timestamp
+        run: |
+          echo "TIMESTAMP=$(date +'%Y%m%d_%H%M%S')" >> $GITHUB_ENV
+
       - name: Join tiles and generate PMTiles
         run: |
-          OUTPUT_NAME="kokuyurinya_${TIMESTAMP}.pmtiles"
+          OUTPUT_NAME="kokuyurinya_${{ env.TIMESTAMP }}.pmtiles"
+          WORKFLOW_CONFIG_NAME="generate-pmtiles_${{ env.TIMESTAMP }}.yml"
           
           tile-join -o "data/processed/$OUTPUT_NAME" \
             -n "国土数値情報 国有林野データ" \
@@ -120,15 +125,33 @@ jobs:
             data/processed/kokuyurinmeisho.mbtiles \
             data/processed/keikakukumeisho.mbtiles
 
+          # YAMLファイルをコピー
+          cp .github/workflows/generate-pmtiles.yml "data/processed/$WORKFLOW_CONFIG_NAME"
+
           # 実験用または本番用のディレクトリにコピー
           if [ "${{ github.event.inputs.experiment_name }}" != "" ]; then
-            mkdir -p "experiments/${{ github.event.inputs.experiment_name }}"
-            cp "data/processed/$OUTPUT_NAME" "experiments/${{ github.event.inputs.experiment_name }}/"
-            cp "data/processed/$OUTPUT_NAME" "_site/tiles/experiments/"
+            OUTPUT_DIR="experiments/${{ github.event.inputs.experiment_name }}/${{ env.TIMESTAMP }}"
+            mkdir -p "$OUTPUT_DIR"
+            cp "data/processed/$OUTPUT_NAME" "$OUTPUT_DIR/"
+            cp "data/processed/$WORKFLOW_CONFIG_NAME" "$OUTPUT_DIR/"
+            
+            # GitHub Pages用のコピー
+            mkdir -p "_site/tiles/experiments/${{ github.event.inputs.experiment_name }}"
+            cp "data/processed/$OUTPUT_NAME" "_site/tiles/experiments/${{ github.event.inputs.experiment_name }}/"
+            cp "data/processed/$WORKFLOW_CONFIG_NAME" "_site/tiles/experiments/${{ github.event.inputs.experiment_name }}/"
           elif [ "${{ github.event.inputs.production_release }}" = "true" ]; then
-            cp "data/processed/$OUTPUT_NAME" "production/releases/"
+            OUTPUT_DIR="production/releases/${{ env.TIMESTAMP }}"
+            mkdir -p "$OUTPUT_DIR"
+            cp "data/processed/$OUTPUT_NAME" "$OUTPUT_DIR/"
+            cp "data/processed/$WORKFLOW_CONFIG_NAME" "$OUTPUT_DIR/"
+            
+            # GitHub Pages用のコピー
+            mkdir -p "_site/tiles/releases"
             cp "data/processed/$OUTPUT_NAME" "_site/tiles/releases/"
-            ln -sf "releases/$OUTPUT_NAME" "production/latest.pmtiles"
+            cp "data/processed/$WORKFLOW_CONFIG_NAME" "_site/tiles/releases/"
+            
+            # 最新版のシンボリックリンク作成
+            ln -sf "releases/${{ env.TIMESTAMP }}/$OUTPUT_NAME" "production/latest.pmtiles"
             cp "data/processed/$OUTPUT_NAME" "_site/tiles/latest.pmtiles"
           fi
 
