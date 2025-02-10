@@ -120,8 +120,8 @@ jobs:
             cp -r data/processed/tiles "$OUTPUT_DIR/"
             cp "data/processed/$WORKFLOW_CONFIG_NAME" "$OUTPUT_DIR/"
             
-            mkdir -p "_site/tiles/experiments/${{ github.event.inputs.experiment_name }}"
-            cp -r data/processed/tiles "_site/tiles/experiments/${{ github.event.inputs.experiment_name }}/"
+            mkdir -p "_site/tiles/experiments/${{ github.event.inputs.experiment_name }}/${{ env.TIMESTAMP }}"
+            cp -r data/processed/tiles/* "_site/tiles/experiments/${{ github.event.inputs.experiment_name }}/${{ env.TIMESTAMP }}/"
             cp "data/processed/$WORKFLOW_CONFIG_NAME" "_site/tiles/experiments/${{ github.event.inputs.experiment_name }}/"
           elif [ "${{ github.event.inputs.production_release }}" = "true" ]; then
             OUTPUT_DIR="production/releases/${{ env.TIMESTAMP }}"
