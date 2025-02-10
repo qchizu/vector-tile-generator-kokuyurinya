@@ -67,7 +67,13 @@ jobs:
         run: |
           # 出力ディレクトリの設定
           TILES_DIR="data/processed/tiles"
-          mkdir -p "$TILES_DIR"
+          mkdir -p "$TILES_DIR/metadata"
+          OUTPUT_NAME="tiles_${{ env.TIMESTAMP }}"
+
+          # 各レイヤーのタイル生成を同じディレクトリに行う
+          for LAYER in "detail" "kokuyurinmeisho" "keikakukumeisho"; do
+            mkdir -p "$TILES_DIR/$LAYER"
+          done
 
           # 詳細レイヤー（ズームレベル14）
           tippecanoe -e "$TILES_DIR" \
