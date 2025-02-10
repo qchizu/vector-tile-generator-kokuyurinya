@@ -112,7 +112,7 @@ jobs:
       - name: Copy tiles to destination
         run: |
           WORKFLOW_CONFIG_NAME="generate-tiles_${{ env.TIMESTAMP }}.yml"
-          cp .github/workflows/generate-tiles.yml "data/processed/$WORKFLOW_CONFIG_NAME"
+          cp .github/workflows/generate-pmtiles.yml "data/processed/$WORKFLOW_CONFIG_NAME"
 
           if [ "${{ github.event.inputs.experiment_name }}" != "" ]; then
             OUTPUT_DIR="experiments/${{ github.event.inputs.experiment_name }}/${{ env.TIMESTAMP }}"
