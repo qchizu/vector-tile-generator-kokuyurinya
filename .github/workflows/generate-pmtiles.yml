@@ -71,6 +71,7 @@ jobs:
 
           # 詳細レイヤー（ズームレベル14）
           tippecanoe -e "$TILES_DIR" \
+            --force \
             -z14 -Z14 \
             --no-tile-size-limit --no-feature-limit \
             -l detail \
@@ -84,6 +85,7 @@ jobs:
             -sql "SELECT ST_Union(geometry) as geometry, A45_013, A45_024 FROM merged GROUP BY A45_013, A45_024"
 
           tippecanoe -e "$TILES_DIR" \
+            --force \
             -z13 -Z10 \
             --no-tile-size-limit --no-feature-limit \
             -l kokuyurinmeisho \
@@ -99,6 +101,7 @@ jobs:
             -sql "SELECT ST_Union(geometry) as geometry, A45_024 FROM merged GROUP BY A45_024"
 
           tippecanoe -e "$TILES_DIR" \
+            --force \
             -z9 -Z2 \
             --no-tile-size-limit --no-feature-limit \
             -l keikakukumeisho \
