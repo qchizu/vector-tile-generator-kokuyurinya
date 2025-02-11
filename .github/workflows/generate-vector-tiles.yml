@@ -200,23 +200,78 @@ jobs:
 
       - name: Generate index page
         run: |
+          # HTMLの基本構造を作成
           cat > _site/index.html << 'EOF'
           <!DOCTYPE html>
           <html>
           <head>
             <meta charset="utf-8">
             <title>Vector Tiles Hosting</title>
+            <style>
+              body { font-family: Arial, sans-serif; margin: 20px; }
+              .tile-list { margin: 20px 0; }
+              .tile-entry { 
+                margin: 10px 0;
+                padding: 10px;
+                background-color: #f5f5f5;
+                border-radius: 4px;
+              }
+              .production { border-left: 4px solid #4CAF50; }
+              .test { border-left: 4px solid #2196F3; }
+              code { 
+                background-color: #e0e0e0;
+                padding: 2px 4px;
+                border-radius: 3px;
+              }
+              .timestamp {
+                color: #666;
+                font-size: 0.9em;
+              }
+            </style>
           </head>
           <body>
             <h1>Vector Tiles Hosting</h1>
+          EOF
+
+          # 本番用タイルの確認と表示
+          if [ -d "_site/tiles" ]; then
+            cat >> _site/index.html << 'EOF'
             <h2>Production Tiles</h2>
-            <p>URL: <code>https://[username].github.io/[repo]/tiles/{z}/{x}/{y}.pbf</code></p>
-            
-            <h2>Test Tiles</h2>
-            <p>Directory: <code>https://[username].github.io/[repo]/[timestamp]-tiles/</code></p>
+            <div class="tile-list">
+              <div class="tile-entry production">
+                <p><strong>Current Production Tiles</strong></p>
+                <p>URL: <code>https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/tiles/{z}/{x}/{y}.pbf</code></p>
+              </div>
+            </div>
+            EOF
+          fi
+
+          # テスト用タイルの一覧を生成
+          echo '<h2>Test Tiles</h2>' >> _site/index.html
+          echo '<div class="tile-list">' >> _site/index.html
+
+          # タイムスタンプ付きのテストタイルディレクトリを検索して表示
+          find _site -maxdepth 1 -type d -name "*-tiles" | sort -r | while read -r dir; do
+            timestamp=$(basename "$dir" | sed 's/-tiles//')
+            cat >> _site/index.html << EOF
+            <div class="tile-entry test">
+              <p><strong>Test Build</strong> <span class="timestamp">($timestamp)</span></p>
+              <p>URL: <code>https://\${GITHUB_REPOSITORY_OWNER}.github.io/\${GITHUB_REPOSITORY#*/}/$(basename $dir)/{z}/{x}/{y}.pbf</code></p>
+            </div>
+          EOF
+          done
+
+          echo '</div>' >> _site/index.html
+
+          # HTMLを閉じる
+          cat >> _site/index.html << 'EOF'
           </body>
           </html>
           EOF
+
+          # 環境変数を実際の値に置換
+          sed -i "s/\${GITHUB_REPOSITORY_OWNER}/$GITHUB_REPOSITORY_OWNER/g" _site/index.html
+          sed -i "s/\${GITHUB_REPOSITORY#*\/}/${GITHUB_REPOSITORY#*/}/g" _site/index.html
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
