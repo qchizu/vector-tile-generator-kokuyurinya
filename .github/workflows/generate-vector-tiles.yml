@@ -138,7 +138,7 @@ jobs:
             data/processed/merged_kokuyurinmeisho_dissolved.fgb \
             data/processed/merged.fgb \
             -dialect sqlite \
-            -sql "SELECT ST_Union(geometry) as geometry, A45_013, A45_024 FROM merged GROUP BY A45_013, A45_024"
+            -sql "SELECT ST_Union(geometry) as geometry, 国有林名称, 計画区名称 FROM merged GROUP BY 国有林名称, 計画区名称"
 
           tippecanoe -e "$KOKUYURIN_DIR" \
             --no-tile-compression \
@@ -157,7 +157,7 @@ jobs:
             data/processed/merged_keikakukumeisho_dissolved.fgb \
             data/processed/merged.fgb \
             -dialect sqlite \
-            -sql "SELECT ST_Union(geometry) as geometry, A45_024 FROM merged GROUP BY A45_024"
+            -sql "SELECT ST_Union(geometry) as geometry, 計画区名称 FROM merged GROUP BY 計画区名称"
 
           tippecanoe -e "$KEIKAKUKU_DIR" \
             --no-tile-compression \
