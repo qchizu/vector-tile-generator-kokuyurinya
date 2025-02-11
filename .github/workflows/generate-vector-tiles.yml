@@ -175,6 +175,22 @@ jobs:
           rm -rf "$BASE_TILES_DIR/tiles"
           mv "$FINAL_TILES_DIR" "$BASE_TILES_DIR/tiles"
 
+          # 各ズームレベルのタイルの最大ファイルサイズを分析
+          echo "Analyzing maximum tile sizes for each zoom level..."
+          {
+            echo "zoom_level,max_size_bytes"
+            for zoom_dir in "$BASE_TILES_DIR"/tiles/*; do
+              if [ -d "$zoom_dir" ]; then
+                zoom_level=$(basename "$zoom_dir")
+                # findコマンドで最大のファイルサイズを取得
+                max_size=$(find "$zoom_dir" -type f -name "*.pbf" -printf "%s\n" | sort -nr | head -n1)
+                if [ ! -z "$max_size" ]; then
+                  echo "$zoom_level,$max_size"
+                fi
+              fi
+            done
+          } > "$BASE_TILES_DIR/tile_sizes.csv"
+
       - name: Copy tiles to destination
         run: |
           if [ "${{ github.event.inputs.is_production }}" = "true" ]; then
