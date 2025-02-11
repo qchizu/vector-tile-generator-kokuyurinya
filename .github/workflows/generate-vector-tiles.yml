@@ -37,7 +37,8 @@ jobs:
       - name: Setup GDAL
         run: |
           sudo apt-get update
-          sudo apt-get install -y gdal-bin
+          sudo apt-get install -y gdal-bin python3-pip
+          pip3 install pandas
 
       - name: Setup tippecanoe
         run: |
@@ -60,8 +61,58 @@ jobs:
       - name: Merge GeoJSON files
         run: |
           python3 $(which ogrmerge.py) -single \
-            -o data/processed/merged.geojson \
+            -f FlatGeobuf \
+            -o data/processed/merged.fgb \
             data/source/*.geojson || echo "No source files found"
+
+      - name: Rename attributes if list.csv exists
+        run: |
+          if [ -f "data/source/list.csv" ]; then
+            python3 - << 'EOF'
+          import pandas as pd
+          import subprocess
+          import os
+          
+          # CSVファイルの読み込み
+          rename_df = pd.read_csv('data/source/list.csv', header=0)
+          
+          # SQLクエリの構築
+          select_parts = []
+          for _, row in rename_df.iterrows():
+              old_name = row.iloc[0]
+              new_name = row.iloc[1]
+              select_parts.append(f"{old_name} as {new_name}")
+          
+          # 変更対象外の属性を取得
+          output = subprocess.check_output(['ogrinfo', '-so', 'data/processed/merged.fgb']).decode('utf-8')
+          all_fields = []
+          for line in output.split('\n'):
+              if ': ' in line and not line.startswith('INFO'):
+                  field_name = line.split(':')[0].strip()
+                  all_fields.append(field_name)
+          
+          # 変更対象外の属性をそのまま追加
+          old_names = rename_df.iloc[:, 0].tolist()
+          unchanged_fields = [f for f in all_fields if f not in old_names]
+          select_parts.extend(unchanged_fields)
+          
+          # SQL文の作成
+          sql = f"SELECT geometry, {', '.join(select_parts)} FROM merged"
+          
+          # 属性名変更済みのFlatGeobufファイルを作成
+          subprocess.run([
+              'ogr2ogr',
+              '-f', 'FlatGeobuf',
+              'data/processed/merged_renamed.fgb',
+              'data/processed/merged.fgb',
+              '-dialect', 'sqlite',
+              '-sql', sql
+          ])
+          
+          # 元のファイルを置き換え
+          os.replace('data/processed/merged_renamed.fgb', 'data/processed/merged.fgb')
+          EOF
+          fi
 
       - name: Generate tiles
         run: |
@@ -77,7 +128,7 @@ jobs:
             -z14 -Z14 \
             --no-tile-size-limit --no-feature-limit \
             -l detail \
-            data/processed/merged.geojson
+            data/processed/merged.fgb
 
           # 国有林名称レイヤー（ズームレベル10-13）
           KOKUYURIN_DIR="$BASE_TILES_DIR/kokuyurin_temp"
@@ -85,7 +136,7 @@ jobs:
           
           ogr2ogr -f FlatGeobuf \
             data/processed/merged_kokuyurinmeisho_dissolved.fgb \
-            data/processed/merged.geojson \
+            data/processed/merged.fgb \
             -dialect sqlite \
             -sql "SELECT ST_Union(geometry) as geometry, A45_013, A45_024 FROM merged GROUP BY A45_013, A45_024"
 
@@ -104,7 +155,7 @@ jobs:
           
           ogr2ogr -f FlatGeobuf \
             data/processed/merged_keikakukumeisho_dissolved.fgb \
-            data/processed/merged.geojson \
+            data/processed/merged.fgb \
             -dialect sqlite \
             -sql "SELECT ST_Union(geometry) as geometry, A45_024 FROM merged GROUP BY A45_024"
 
