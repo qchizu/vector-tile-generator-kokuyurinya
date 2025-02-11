@@ -1,0 +1,288 @@
+name: Generate Vector Tiles
+
+on:
+  push:
+    paths:
+      - 'data/source/**'
+  workflow_dispatch:
+    inputs:
+      experiment_name:
+        description: 'Name for this experimental configuration'
+        required: false
+        type: string
+      production_release:
+        description: 'Mark this as a production release'
+        required: false
+        type: boolean
+        default: false
+      version_tag:
+        description: 'Version tag for production release (e.g., v1.0.0)'
+        required: false
+        type: string
+
+env:
+  TIMESTAMP: $(date +'%Y%m%d_%H%M%S')
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup GDAL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gdal-bin python3-pip
+          pip3 install pandas
+
+      - name: Setup tippecanoe
+        run: |
+          git clone https://github.com/felt/tippecanoe.git
+          cd tippecanoe
+          make -j
+          sudo make install
+
+      - name: Create directory structure
+        run: |
+          mkdir -p data/processed
+          mkdir -p experiments
+          mkdir -p production/releases
+          mkdir -p _site/tiles/{experiments,releases}
+
+      - name: Set timestamp
+        run: |
+          echo "TIMESTAMP=$(date +'%Y%m%d_%H%M%S')" >> $GITHUB_ENV
+
+      - name: Merge GeoJSON files
+        run: |
+          python3 $(which ogrmerge.py) -single \
+            -f FlatGeobuf \
+            -o data/processed/merged.fgb \
+            data/source/*.geojson || echo "No source files found"
+
+      - name: Rename attributes if list.csv exists
+        run: |
+          if [ -f "data/source/list.csv" ]; then
+            python3 - << 'EOF'
+          import pandas as pd
+          import subprocess
+          import os
+          
+          # CSVファイルの読み込み
+          rename_df = pd.read_csv('data/source/list.csv', header=0)
+          
+          # SQLクエリの構築
+          select_parts = []
+          for _, row in rename_df.iterrows():
+              old_name = row.iloc[0]
+              new_name = row.iloc[1]
+              select_parts.append(f"{old_name} as {new_name}")
+          
+          # 変更対象外の属性を取得
+          output = subprocess.check_output(['ogrinfo', '-so', 'data/processed/merged.fgb']).decode('utf-8')
+          all_fields = []
+          for line in output.split('\n'):
+              if ': ' in line and not line.startswith('INFO'):
+                  field_name = line.split(':')[0].strip()
+                  all_fields.append(field_name)
+          
+          # 変更対象外の属性をそのまま追加
+          old_names = rename_df.iloc[:, 0].tolist()
+          unchanged_fields = [f for f in all_fields if f not in old_names]
+          select_parts.extend(unchanged_fields)
+          
+          # SQL文の作成
+          sql = f"SELECT geometry, {', '.join(select_parts)} FROM merged"
+          
+          # 属性名変更済みのFlatGeobufファイルを作成
+          subprocess.run([
+              'ogr2ogr',
+              '-f', 'FlatGeobuf',
+              'data/processed/merged_renamed.fgb',
+              'data/processed/merged.fgb',
+              '-dialect', 'sqlite',
+              '-sql', sql,
+              '-nln', 'merged'  # レイヤー名を明示的に指定
+          ])
+          
+          # 元のファイルを置き換え
+          os.replace('data/processed/merged_renamed.fgb', 'data/processed/merged.fgb')
+          EOF
+          fi
+
+      - name: Generate tiles
+        run: |
+          # 出力ディレクトリの設定
+          BASE_TILES_DIR="data/processed/tiles"
+          mkdir -p "$BASE_TILES_DIR"
+
+          # 詳細レイヤー（ズームレベル14）
+          DETAIL_DIR="$BASE_TILES_DIR/detail_temp"
+          mkdir -p "$DETAIL_DIR"
+          tippecanoe -e "$DETAIL_DIR" \
+            --no-tile-compression \
+            -z14 -Z14 \
+            --no-tile-size-limit --no-feature-limit \
+            -l detail \
+            data/processed/merged.fgb
+
+          # 国有林名称レイヤー（ズームレベル10-13）
+          KOKUYURIN_DIR="$BASE_TILES_DIR/kokuyurin_temp"
+          mkdir -p "$KOKUYURIN_DIR"
+          
+          ogr2ogr -f FlatGeobuf \
+            data/processed/merged_kokuyurinmeisho_dissolved.fgb \
+            data/processed/merged.fgb \
+            -dialect sqlite \
+            -sql "SELECT ST_Union(geometry) as geometry, 国有林名称, 計画区名称 FROM merged GROUP BY 国有林名称, 計画区名称"
+
+          tippecanoe -e "$KOKUYURIN_DIR" \
+            --no-tile-compression \
+            -z13 -Z10 \
+            --no-tile-size-limit --no-feature-limit \
+            -l kokuyurinmeisho \
+            --no-simplification-of-shared-nodes \
+            --detect-shared-borders \
+            data/processed/merged_kokuyurinmeisho_dissolved.fgb
+
+          # 計画区名称レイヤー（ズームレベル2-9）
+          KEIKAKUKU_DIR="$BASE_TILES_DIR/keikakuku_temp"
+          mkdir -p "$KEIKAKUKU_DIR"
+          
+          ogr2ogr -f FlatGeobuf \
+            data/processed/merged_keikakukumeisho_dissolved.fgb \
+            data/processed/merged.fgb \
+            -dialect sqlite \
+            -sql "SELECT ST_Union(geometry) as geometry, 計画区名称 FROM merged GROUP BY 計画区名称"
+
+          tippecanoe -e "$KEIKAKUKU_DIR" \
+            --no-tile-compression \
+            -z9 -Z2 \
+            --no-tile-size-limit --no-feature-limit \
+            -l keikakukumeisho \
+            --no-simplification-of-shared-nodes \
+            --detect-shared-borders \
+            data/processed/merged_keikakukumeisho_dissolved.fgb
+
+          # タイルの統合
+          FINAL_TILES_DIR="$BASE_TILES_DIR/combined"
+          mkdir -p "$FINAL_TILES_DIR"
+          
+          # 各ズームレベルのタイルを適切なディレクトリにコピー
+          cp -r "$DETAIL_DIR"/* "$FINAL_TILES_DIR/"
+          cp -r "$KOKUYURIN_DIR"/* "$FINAL_TILES_DIR/"
+          cp -r "$KEIKAKUKU_DIR"/* "$FINAL_TILES_DIR/"
+          
+          # 一時ディレクトリの削除
+          rm -rf "$DETAIL_DIR" "$KOKUYURIN_DIR" "$KEIKAKUKU_DIR"
+          
+          # 最終的なタイルディレクトリを移動
+          rm -rf "$BASE_TILES_DIR/tiles"
+          mv "$FINAL_TILES_DIR" "$BASE_TILES_DIR/tiles"
+
+      - name: Copy tiles to destination
+        run: |
+          WORKFLOW_CONFIG_NAME="generate-tiles_${{ env.TIMESTAMP }}.yml"
+          cp .github/workflows/generate-vector-tiles.yml "data/processed/$WORKFLOW_CONFIG_NAME"
+
+          if [ "${{ github.event.inputs.experiment_name }}" != "" ]; then
+            OUTPUT_DIR="experiments/${{ github.event.inputs.experiment_name }}/${{ env.TIMESTAMP }}"
+            mkdir -p "$OUTPUT_DIR"
+            cp -r data/processed/tiles/tiles "$OUTPUT_DIR/"
+            cp "data/processed/$WORKFLOW_CONFIG_NAME" "$OUTPUT_DIR/"
+            
+            mkdir -p "_site/tiles/experiments/${{ github.event.inputs.experiment_name }}/${{ env.TIMESTAMP }}"
+            cp -r data/processed/tiles/tiles/* "_site/tiles/experiments/${{ github.event.inputs.experiment_name }}/${{ env.TIMESTAMP }}/"
+            cp "data/processed/$WORKFLOW_CONFIG_NAME" "_site/tiles/experiments/${{ github.event.inputs.experiment_name }}/"
+          elif [ "${{ github.event.inputs.production_release }}" = "true" ]; then
+            OUTPUT_DIR="production/releases/${{ env.TIMESTAMP }}"
+            mkdir -p "$OUTPUT_DIR"
+            cp -r data/processed/tiles/tiles "$OUTPUT_DIR/"
+            cp "data/processed/$WORKFLOW_CONFIG_NAME" "$OUTPUT_DIR/"
+            
+            mkdir -p "_site/tiles/releases"
+            cp -r data/processed/tiles/tiles/* "_site/tiles/releases/"
+            cp "data/processed/$WORKFLOW_CONFIG_NAME" "_site/tiles/releases/"
+            
+            rm -f "production/latest" && ln -s "releases/${{ env.TIMESTAMP }}/tiles" "production/latest"
+            rm -rf "_site/tiles/latest" && cp -r data/processed/tiles/tiles "_site/tiles/latest"
+          fi
+
+      - name: Create version.json
+        if: github.event.inputs.production_release == 'true'
+        run: |
+          cat > _site/tiles/version.json << EOF
+          {
+            "version": "${{ github.event.inputs.version_tag }}",
+            "timestamp": "${{ env.TIMESTAMP }}"
+          }
+          EOF
+
+      - name: Generate index page
+        run: |
+          cat > _site/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <title>Vector Tiles Hosting</title>
+          </head>
+          <body>
+            <h1>Vector Tiles Hosting</h1>
+            <h2>Latest Production Release</h2>
+            <p>Base URL: <code>https://[username].github.io/[repo]/tiles/latest/{z}/{x}/{y}.pbf</code></p>
+            
+            <h2>All Releases</h2>
+            <p>Directory: <code>https://[username].github.io/[repo]/tiles/releases/</code></p>
+            
+            <h2>Experiments</h2>
+            <p>Directory: <code>https://[username].github.io/[repo]/tiles/experiments/</code></p>
+            
+            <h2>Version Info</h2>
+            <p>JSON: <code>https://[username].github.io/[repo]/tiles/version.json</code></p>
+          </body>
+          </html>
+          EOF
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '_site'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Commit changes
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          
+          git add experiments/
+          git add production/
+          
+          if [ "${{ github.event.inputs.production_release }}" = "true" ]; then
+            git tag "${{ github.event.inputs.version_tag }}"
+          fi
+          
+          COMMIT_MSG="Update vector tiles and configurations
+
+          ${{ env.TIMESTAMP }}"
+          
+          if [ "${{ github.event.inputs.production_release }}" = "true" ]; then
+            COMMIT_MSG="${COMMIT_MSG}
+          Production Release: ${{ github.event.inputs.version_tag }}"
+          fi
+          
+          git commit -m "${COMMIT_MSG}" || echo "No changes to commit"
+          
+          git push --tags || echo "No tags to push"
+          git push || echo "No changes to push"
