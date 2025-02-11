@@ -188,18 +188,14 @@ jobs:
           # 各ズームレベルのタイルの最大ファイルサイズを分析
           echo "Analyzing maximum tile sizes for each zoom level..."
           {
-            echo "zoom_level,max_size_bytes,max_size_file"
+            echo "zoom_level,max_size_bytes"
             for zoom_dir in "$BASE_TILES_DIR"/tiles/*; do
               if [ -d "$zoom_dir" ]; then
                 zoom_level=$(basename "$zoom_dir")
-                # findコマンドで最大のファイルを特定
-                max_size_info=$(find "$zoom_dir" -type f -name "*.pbf" -exec ls -l {} \; | \
-                              sort -nr -k5 | \
-                              head -n1)
-                if [ ! -z "$max_size_info" ]; then
-                  max_size=$(echo "$max_size_info" | awk '{print $5}')
-                  max_file=$(echo "$max_size_info" | awk '{print $9}')
-                  echo "$zoom_level,$max_size,${max_file##*/}"
+                # findコマンドで最大のファイルサイズを取得
+                max_size=$(find "$zoom_dir" -type f -name "*.pbf" -printf "%s\n" | sort -nr | head -n1)
+                if [ ! -z "$max_size" ]; then
+                  echo "$zoom_level,$max_size"
                 fi
               fi
             done
