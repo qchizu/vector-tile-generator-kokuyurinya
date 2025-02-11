@@ -1,0 +1,16 @@
+{
+"name": "processed/tiles/keikakuku_temp",
+"description": "processed/tiles/keikakuku_temp",
+"version": "2",
+"minzoom": "2",
+"maxzoom": "9",
+"center": "136.757813,36.314610,9",
+"bounds": "136.251049,36.067364,137.763007,36.944528",
+"antimeridian_adjusted_bounds": "136.251049,36.067364,137.763007,36.944528",
+"type": "overlay",
+"strategies": "[{},{},{\"tiny_polygons\":4},{\"tiny_polygons\":4},{\"tiny_polygons\":4},{\"tiny_polygons\":4},{\"tiny_polygons\":5},{\"tiny_polygons\":4},{\"tiny_polygons\":5},{\"tiny_polygons\":3}]",
+"format": "pbf",
+"generator": "tippecanoe v2.75.1",
+"generator_options": "tippecanoe -e processed/tiles/keikakuku_temp --no-tile-compression -z9 -Z2 --no-tile-size-limit --no-feature-limit -l keikakukumeisho --no-simplification-of-shared-nodes --detect-shared-borders processed/merged_keikakukumeisho_dissolved.fgb",
+"json": "{\"vector_layers\":[{\"id\":\"keikakukumeisho\",\"description\":\"\",\"minzoom\":2,\"maxzoom\":9,\"fields\":{\"計画区名称\":\"String\"}}],\"tilestats\":{\"layerCount\":1,\"layers\":[{\"layer\":\"keikakukumeisho\",\"count\":4,\"geometry\":\"Polygon\",\"attributeCount\":1,\"attributes\":[{\"attribute\":\"計画区名称\",\"count\":3,\"type\":\"string\",\"values\":[\"加賀\",\"庄川\",\"神通川\"]}]}]}}"
+}
