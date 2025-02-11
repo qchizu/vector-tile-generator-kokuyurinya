@@ -66,17 +66,13 @@ jobs:
       - name: Generate tiles
         run: |
           # 出力ディレクトリの設定
-          TILES_DIR="data/processed/tiles"
-          mkdir -p "$TILES_DIR/metadata"
-          OUTPUT_NAME="tiles_${{ env.TIMESTAMP }}"
-
-          # 各レイヤーのタイル生成を同じディレクトリに行う
-          for LAYER in "detail" "kokuyurinmeisho" "keikakukumeisho"; do
-            mkdir -p "$TILES_DIR/$LAYER"
-          done
+          BASE_TILES_DIR="data/processed/tiles"
+          mkdir -p "$BASE_TILES_DIR"
 
           # 詳細レイヤー（ズームレベル14）
-          tippecanoe -e "$TILES_DIR" \
+          DETAIL_DIR="$BASE_TILES_DIR/detail_temp"
+          mkdir -p "$DETAIL_DIR"
+          tippecanoe -e "$DETAIL_DIR" \
             --no-tile-compression \
             -z14 -Z14 \
             --no-tile-size-limit --no-feature-limit \
@@ -84,13 +80,16 @@ jobs:
             data/processed/merged.geojson
 
           # 国有林名称レイヤー（ズームレベル10-13）
+          KOKUYURIN_DIR="$BASE_TILES_DIR/kokuyurin_temp"
+          mkdir -p "$KOKUYURIN_DIR"
+          
           ogr2ogr -f FlatGeobuf \
             data/processed/merged_kokuyurinmeisho_dissolved.fgb \
             data/processed/merged.geojson \
             -dialect sqlite \
             -sql "SELECT ST_Union(geometry) as geometry, A45_013, A45_024 FROM merged GROUP BY A45_013, A45_024"
 
-          tippecanoe -e "$TILES_DIR" \
+          tippecanoe -e "$KOKUYURIN_DIR" \
             --no-tile-compression \
             -z13 -Z10 \
             --no-tile-size-limit --no-feature-limit \
@@ -100,13 +99,16 @@ jobs:
             data/processed/merged_kokuyurinmeisho_dissolved.fgb
 
           # 計画区名称レイヤー（ズームレベル2-9）
+          KEIKAKUKU_DIR="$BASE_TILES_DIR/keikakuku_temp"
+          mkdir -p "$KEIKAKUKU_DIR"
+          
           ogr2ogr -f FlatGeobuf \
             data/processed/merged_keikakukumeisho_dissolved.fgb \
             data/processed/merged.geojson \
             -dialect sqlite \
             -sql "SELECT ST_Union(geometry) as geometry, A45_024 FROM merged GROUP BY A45_024"
 
-          tippecanoe -e "$TILES_DIR" \
+          tippecanoe -e "$KEIKAKUKU_DIR" \
             --no-tile-compression \
             -z9 -Z2 \
             --no-tile-size-limit --no-feature-limit \
@@ -114,6 +116,22 @@ jobs:
             --no-simplification-of-shared-nodes \
             --detect-shared-borders \
             data/processed/merged_keikakukumeisho_dissolved.fgb
+
+          # タイルの統合
+          FINAL_TILES_DIR="$BASE_TILES_DIR/combined"
+          mkdir -p "$FINAL_TILES_DIR"
+          
+          # 各ズームレベルのタイルを適切なディレクトリにコピー
+          cp -r "$DETAIL_DIR"/* "$FINAL_TILES_DIR/"
+          cp -r "$KOKUYURIN_DIR"/* "$FINAL_TILES_DIR/"
+          cp -r "$KEIKAKUKU_DIR"/* "$FINAL_TILES_DIR/"
+          
+          # 一時ディレクトリの削除
+          rm -rf "$DETAIL_DIR" "$KOKUYURIN_DIR" "$KEIKAKUKU_DIR"
+          
+          # 最終的なタイルディレクトリを移動
+          rm -rf "$BASE_TILES_DIR/tiles"
+          mv "$FINAL_TILES_DIR" "$BASE_TILES_DIR/tiles"
 
       - name: Copy tiles to destination
         run: |
@@ -123,24 +141,24 @@ jobs:
           if [ "${{ github.event.inputs.experiment_name }}" != "" ]; then
             OUTPUT_DIR="experiments/${{ github.event.inputs.experiment_name }}/${{ env.TIMESTAMP }}"
             mkdir -p "$OUTPUT_DIR"
-            cp -r data/processed/tiles "$OUTPUT_DIR/"
+            cp -r data/processed/tiles/tiles "$OUTPUT_DIR/"
             cp "data/processed/$WORKFLOW_CONFIG_NAME" "$OUTPUT_DIR/"
             
             mkdir -p "_site/tiles/experiments/${{ github.event.inputs.experiment_name }}/${{ env.TIMESTAMP }}"
-            cp -r data/processed/tiles/* "_site/tiles/experiments/${{ github.event.inputs.experiment_name }}/${{ env.TIMESTAMP }}/"
+            cp -r data/processed/tiles/tiles/* "_site/tiles/experiments/${{ github.event.inputs.experiment_name }}/${{ env.TIMESTAMP }}/"
             cp "data/processed/$WORKFLOW_CONFIG_NAME" "_site/tiles/experiments/${{ github.event.inputs.experiment_name }}/"
           elif [ "${{ github.event.inputs.production_release }}" = "true" ]; then
             OUTPUT_DIR="production/releases/${{ env.TIMESTAMP }}"
             mkdir -p "$OUTPUT_DIR"
-            cp -r data/processed/tiles "$OUTPUT_DIR/"
+            cp -r data/processed/tiles/tiles "$OUTPUT_DIR/"
             cp "data/processed/$WORKFLOW_CONFIG_NAME" "$OUTPUT_DIR/"
             
             mkdir -p "_site/tiles/releases"
-            cp -r data/processed/tiles "_site/tiles/releases/"
+            cp -r data/processed/tiles/tiles/* "_site/tiles/releases/"
             cp "data/processed/$WORKFLOW_CONFIG_NAME" "_site/tiles/releases/"
             
             rm -f "production/latest" && ln -s "releases/${{ env.TIMESTAMP }}/tiles" "production/latest"
-            rm -rf "_site/tiles/latest" && cp -r data/processed/tiles "_site/tiles/latest"
+            rm -rf "_site/tiles/latest" && cp -r data/processed/tiles/tiles "_site/tiles/latest"
           fi
 
       - name: Create version.json
