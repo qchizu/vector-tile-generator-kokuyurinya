@@ -185,6 +185,26 @@ jobs:
           rm -rf "$BASE_TILES_DIR/tiles"
           mv "$FINAL_TILES_DIR" "$BASE_TILES_DIR/tiles"
 
+          # 各ズームレベルのタイルの最大ファイルサイズを分析
+          echo "Analyzing maximum tile sizes for each zoom level..."
+          {
+            echo "zoom_level,max_size_bytes,max_size_file"
+            for zoom_dir in "$BASE_TILES_DIR"/tiles/*; do
+              if [ -d "$zoom_dir" ]; then
+                zoom_level=$(basename "$zoom_dir")
+                # findコマンドで最大のファイルを特定
+                max_size_info=$(find "$zoom_dir" -type f -name "*.pbf" -exec ls -l {} \; | \
+                              sort -nr -k5 | \
+                              head -n1)
+                if [ ! -z "$max_size_info" ]; then
+                  max_size=$(echo "$max_size_info" | awk '{print $5}')
+                  max_file=$(echo "$max_size_info" | awk '{print $9}')
+                  echo "$zoom_level,$max_size,${max_file##*/}"
+                fi
+              fi
+            done
+          } > "$BASE_TILES_DIR/tile_sizes.csv"
+
       - name: Copy tiles to destination
         run: |
           WORKFLOW_CONFIG_NAME="generate-tiles_${{ env.TIMESTAMP }}.yml"
@@ -195,22 +215,27 @@ jobs:
             mkdir -p "$OUTPUT_DIR"
             cp -r data/processed/tiles/tiles "$OUTPUT_DIR/"
             cp "data/processed/$WORKFLOW_CONFIG_NAME" "$OUTPUT_DIR/"
+            cp "data/processed/tiles/tile_sizes.csv" "$OUTPUT_DIR/"
             
             mkdir -p "_site/tiles/experiments/${{ github.event.inputs.experiment_name }}/${{ env.TIMESTAMP }}"
             cp -r data/processed/tiles/tiles/* "_site/tiles/experiments/${{ github.event.inputs.experiment_name }}/${{ env.TIMESTAMP }}/"
             cp "data/processed/$WORKFLOW_CONFIG_NAME" "_site/tiles/experiments/${{ github.event.inputs.experiment_name }}/"
+            cp "data/processed/tiles/tile_sizes.csv" "_site/tiles/experiments/${{ github.event.inputs.experiment_name }}/${{ env.TIMESTAMP }}/"
           elif [ "${{ github.event.inputs.production_release }}" = "true" ]; then
             OUTPUT_DIR="production/releases/${{ env.TIMESTAMP }}"
             mkdir -p "$OUTPUT_DIR"
             cp -r data/processed/tiles/tiles "$OUTPUT_DIR/"
             cp "data/processed/$WORKFLOW_CONFIG_NAME" "$OUTPUT_DIR/"
+            cp "data/processed/tiles/tile_sizes.csv" "$OUTPUT_DIR/"
             
             mkdir -p "_site/tiles/releases"
             cp -r data/processed/tiles/tiles/* "_site/tiles/releases/"
             cp "data/processed/$WORKFLOW_CONFIG_NAME" "_site/tiles/releases/"
+            cp "data/processed/tiles/tile_sizes.csv" "_site/tiles/releases/"
             
             rm -f "production/latest" && ln -s "releases/${{ env.TIMESTAMP }}/tiles" "production/latest"
             rm -rf "_site/tiles/latest" && cp -r data/processed/tiles/tiles "_site/tiles/latest"
+            cp "data/processed/tiles/tile_sizes.csv" "_site/tiles/latest/"
           fi
 
       - name: Create version.json
@@ -245,6 +270,9 @@ jobs:
             
             <h2>Version Info</h2>
             <p>JSON: <code>https://[username].github.io/[repo]/tiles/version.json</code></p>
+
+            <h2>Tile Size Information</h2>
+            <p>CSV: <code>https://[username].github.io/[repo]/tiles/latest/tile_sizes.csv</code></p>
           </body>
           </html>
           EOF
