@@ -106,7 +106,8 @@ jobs:
               'data/processed/merged_renamed.fgb',
               'data/processed/merged.fgb',
               '-dialect', 'sqlite',
-              '-sql', sql
+              '-sql', sql,
+              '-nln', 'merged'  # レイヤー名を明示的に指定
           ])
           
           # 元のファイルを置き換え
