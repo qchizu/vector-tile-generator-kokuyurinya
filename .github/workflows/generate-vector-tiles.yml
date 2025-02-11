@@ -198,20 +198,24 @@ jobs:
             rm -rf "tiles"
             mkdir -p "tiles"
             cp -r processed/tiles/tiles/* "tiles/"
+            cp processed/tiles/tile_sizes.csv "tiles/"
             
-            # GitHub Pages用
-            rm -rf "_site/tiles"
+            # GitHub Pages用（既存の_siteディレクトリを空にする）
+            rm -rf "_site"/*
             mkdir -p "_site/tiles"
             cp -r processed/tiles/tiles/* "_site/tiles/"
+            cp processed/tiles/tile_sizes.csv "_site/tiles/"
           else
             # テスト用: タイムスタンプ付きディレクトリにコピー
             TEST_DIR="${{ env.TIMESTAMP }}-tiles"
             mkdir -p "$TEST_DIR"
             cp -r processed/tiles/tiles/* "$TEST_DIR/"
+            cp processed/tiles/tile_sizes.csv "$TEST_DIR/"
             
             # GitHub Pages用
             mkdir -p "_site/$TEST_DIR"
             cp -r processed/tiles/tiles/* "_site/$TEST_DIR/"
+            cp processed/tiles/tile_sizes.csv "_site/$TEST_DIR/"
           fi
 
       - name: Generate index page
@@ -243,44 +247,63 @@ jobs:
                 color: #666;
                 font-size: 0.9em;
               }
+              .metadata {
+                margin-top: 5px;
+                font-size: 0.9em;
+              }
+              .metadata a {
+                color: #2196F3;
+                text-decoration: none;
+              }
+              .metadata a:hover {
+                text-decoration: underline;
+              }
             </style>
           </head>
           <body>
             <h1>Vector Tiles Hosting</h1>
           EOF
 
-          # Add production tiles section if exists
-          if [ -d "_site/tiles" ]; then
-            cat >> _site/index.html << EOF
-            <h2>Production Tiles</h2>
-            <div class="tile-list">
-              <div class="tile-entry production">
-                <p><strong>Current Production Tiles</strong></p>
-                <p>URL: <code>https://$GITHUB_REPOSITORY_OWNER.github.io/${GITHUB_REPOSITORY#*/}/tiles/{z}/{x}/{y}.pbf</code></p>
-              </div>
-            </div>
+          # 全てのタイルセットを一覧表示する関数
+          list_tile_directories() {
+            for dir in "$1"/*/ ; do
+              if [ -d "$dir" ]; then
+                dir_name=$(basename "$dir")
+                
+                # タイルセットの種類を判断（本番用 or テスト用）
+                if [ "$dir_name" = "tiles" ]; then
+                  entry_class="production"
+                  title="Production Tiles"
+                  url_path="tiles"
+                else
+                  entry_class="test"
+                  title="Test Build"
+                  url_path="$dir_name"
+                fi
+                
+                # タイルセット情報を表示
+                cat >> _site/index.html << EOF
+                <div class="tile-entry ${entry_class}">
+                  <p><strong>${title}</strong>
+                    $([ "$dir_name" != "tiles" ] && echo "<span class=\"timestamp\">(${dir_name%%-tiles})</span>")
+                  </p>
+                  <p>URL: <code>https://$GITHUB_REPOSITORY_OWNER.github.io/${GITHUB_REPOSITORY#*/}/${url_path}/{z}/{x}/{y}.pbf</code></p>
+                  <p class="metadata">
+                    <a href="${url_path}/tile_sizes.csv">Download tile size analysis (CSV)</a>
+                  </p>
+                </div>
           EOF
-          fi
+              fi
+            done
+          }
 
-          # Add test tiles section header
+          # タイルセットの一覧を生成
           cat >> _site/index.html << EOF
-          <h2>Test Tiles</h2>
           <div class="tile-list">
           EOF
-
-          # List all test tile directories
-          for dir in _site/*-tiles/; do
-            if [ -d "$dir" ]; then
-              timestamp=$(basename "$dir" | sed 's/-tiles//')
-              cat >> _site/index.html << EOF
-              <div class="tile-entry test">
-                <p><strong>Test Build</strong> <span class="timestamp">($timestamp)</span></p>
-                <p>URL: <code>https://$GITHUB_REPOSITORY_OWNER.github.io/${GITHUB_REPOSITORY#*/}/$(basename $dir)/{z}/{x}/{y}.pbf</code></p>
-              </div>
-          EOF
-            fi
-          done
-
+          
+          list_tile_directories "_site"
+          
           # Close HTML structure
           cat >> _site/index.html << EOF
           </div>
@@ -307,8 +330,10 @@ jobs:
           
           if [ "${{ github.event.inputs.is_production }}" = "true" ]; then
             git add tiles/
+            git add tiles/tile_sizes.csv
           else
             git add "${{ env.TIMESTAMP }}-tiles/"
+            git add "${{ env.TIMESTAMP }}-tiles/tile_sizes.csv"
           fi
           
           COMMIT_MSG="Update vector tiles - ${{ env.TIMESTAMP }}"
