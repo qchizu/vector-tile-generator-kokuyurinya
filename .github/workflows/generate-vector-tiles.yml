@@ -58,12 +58,12 @@ jobs:
         run: |
           echo "TIMESTAMP=$(date +'%Y%m%d_%H%M%S')" >> $GITHUB_ENV
 
-      - name: Merge GeoJSON files
+      - name: Merge GeoJSON and FlatGeobuf  files
         run: |
           python3 $(which ogrmerge.py) -single \
             -f FlatGeobuf \
             -o data/processed/merged.fgb \
-            data/source/*.geojson || echo "No source files found"
+            data/source/*.geojson data/source/*.fgb || echo "No source files found"
 
       - name: Rename attributes if list.csv exists
         run: |
